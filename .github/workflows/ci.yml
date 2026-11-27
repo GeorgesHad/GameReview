@@ -1,0 +1,111 @@
+name: CI and Worker deployment
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Foundation checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run check:deploy
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  deploy:
+    name: Deploy and smoke test Worker
+    needs: checks
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: workers-${{ github.ref_name }}
+      cancel-in-progress: false
+    env:
+      TARGET: ${{ github.ref_name == 'develop' && 'dev' || 'prod' }}
+    steps:
+      - name: Verify production commit was merged through an approved PR
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          pr=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" |
+            jq -cs --arg sha "$GITHUB_SHA" '[.[][] | select(.merged_at != null and .base.ref == "main" and .merge_commit_sha == $sha)] | first // empty')
+          if [[ -z "$pr" ]]; then
+            echo 'Production requires a merge or squash commit from a PR to main.' >&2
+            exit 1
+          fi
+          number=$(jq -r '.number' <<< "$pr")
+          head=$(jq -r '.head.sha' <<< "$pr")
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$number/reviews" |
+            jq -es --arg head "$head" '
+              [.[][] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")]
+              | group_by(.user.id) | map(max_by(.id))
+              | any(.state == "APPROVED" and .commit_id == $head)
+            ' >/dev/null || { echo 'Production requires an active approval for the final PR head.' >&2; exit 1; }
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Confirm the deploy commit is still the branch tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')
+          if [[ "$tip" != "$GITHUB_SHA" ]]; then
+            echo 'The branch advanced. Deploy the current commit instead.' >&2
+            exit 1
+          fi
+      - name: Deploy and verify revision
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets[format('CLOUDFLARE_{0}_API_TOKEN', github.ref_name == 'develop' && 'DEV' || 'PROD')] }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars[format('CLOUDFLARE_{0}_ACCOUNT_ID', github.ref_name == 'develop' && 'DEV' || 'PROD')] }}
+          BASE_URL: ${{ vars[format('CLOUDFLARE_{0}_BASE_URL', github.ref_name == 'develop' && 'DEV' || 'PROD')] }}
+        run: |
+          set -o pipefail
+          : "${CLOUDFLARE_API_TOKEN:?Missing Cloudflare deployment token}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?Missing Cloudflare account ID}"
+          if [[ ! "$BASE_URL" =~ ^https://football-match-review-${TARGET}\.[a-z0-9-]+\.workers\.dev$ ]]; then
+            echo 'Configure the HTTPS workers.dev origin for the selected Worker.' >&2
+            exit 1
+          fi
+          npx --no-install wrangler deploy --env "$TARGET" --tag "$GITHUB_SHA"
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 10 "$BASE_URL/api/v1/health" |
+              jq -e --arg env "$TARGET" --arg sha "$GITHUB_SHA" \
+                '.status == "ok" and .environment == $env and .revision == $sha and (.version | type == "string" and length > 0)' >/dev/null; then
+              curl -fsS --max-time 10 "$BASE_URL/" | grep -F '<title>Football Match Review</title>' >/dev/null
+              exit 0
+            fi
+            if [[ "$attempt" -lt 6 ]]; then sleep 5; fi
+          done
+          echo 'The Worker did not report the expected environment and revision.' >&2
+          exit 1

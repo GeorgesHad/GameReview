@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "football-match-review-local",
+  "main": "backend/src/index.ts",
+  "compatibility_date": "2026-11-27",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./frontend/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api", "/api/*"]
+  },
+  "vars": { "APP_ENV": "local" },
+  "env": {
+    "dev": {
+      "name": "football-match-review-dev",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": { "APP_ENV": "dev" },
+      "version_metadata": { "binding": "WORKER_VERSION" },
+      "observability": { "enabled": true, "head_sampling_rate": 1 }
+    },
+    "prod": {
+      "name": "football-match-review-prod",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": { "APP_ENV": "prod" },
+      "version_metadata": { "binding": "WORKER_VERSION" },
+      "observability": { "enabled": true, "head_sampling_rate": 1 }
+    }
+  }
+}
