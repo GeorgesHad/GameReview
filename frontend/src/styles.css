@@ -51,3 +51,13 @@
 
 .penalty-area:nth-child(2) { border-left: 0; }
 .penalty-area:nth-child(3) { border-right: 0; }
+
+@layer components {
+  .lab-panel { @apply rounded-2xl border border-emerald-100/15 bg-[#11241e] p-5 sm:p-6; }
+  .lab-button { @apply min-h-11 rounded-lg border border-emerald-100/25 px-3 text-sm font-medium text-[#daf3bc] hover:bg-emerald-100/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c3f27d] disabled:opacity-45; }
+  .lab-primary { @apply border-[#c3f27d] bg-[#c3f27d] text-[#11241e] hover:bg-[#daf3bc]; }
+  .lab-input { @apply min-h-11 rounded-lg border border-emerald-100/25 bg-[#0c1c18] p-2 text-[#f0f5e8] focus-visible:outline-2 focus-visible:outline-[#c3f27d]; }
+  .lab-label { @apply flex flex-col gap-1 text-sm font-medium; }
+  .lab-link { @apply text-[#c3f27d] underline underline-offset-4; }
+  .lab-error { @apply text-sm text-[#ffb187]; }
+}

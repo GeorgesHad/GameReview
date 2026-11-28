@@ -16,7 +16,11 @@ export default defineConfig({
     { name: 'mobile-chromium-emulation', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
-    command: 'npm run start -- --ip 127.0.0.1 --port 4173',
+    command: 'npm run build && npm run start -- --ip 127.0.0.1 --port 4173',
+    env: {
+      VITE_VIDEO_POC_SUPABASE_URL: 'https://project-fixture.supabase.co',
+      VITE_VIDEO_POC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture_only',
+    },
     url: `${baseURL}/api/v1/health`,
     timeout: 60_000,
   },

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HealthResponse } from '../../../shared/contracts/health';
 import { getHealth } from '../api/getHealth';
+import { videoLabEnabled } from '../video-poc/config';
 
 type Connection = { state: 'checking' } | { state: 'unreachable' } | { state: 'connected'; health: HealthResponse };
 
@@ -72,6 +73,7 @@ export function App() {
               </p>
             )}
           </section>
+          {videoLabEnabled && <a className="lab-link mt-5 text-sm" href="/video-poc">Open DEV video lab</a>}
         </div>
         <div className="field" aria-hidden="true">
           <div className="pitch"><span className="center-circle" /><span className="penalty-area" /><span className="penalty-area" /></div>

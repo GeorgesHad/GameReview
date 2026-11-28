@@ -30,8 +30,151 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/video-poc/recordings:
+    get:
+      operationId: listDevRecordings
+      summary: List the active DEV admin's recordings and shared budget
+      security: [{ DevBearer: [] }]
+      responses:
+        '200':
+          description: Recordings and quota in bytes. Used bytes include reservations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recordings, usedBytes, limitBytes]
+                properties:
+                  recordings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DevRecording'
+                  usedBytes: { type: integer, minimum: 0 }
+                  limitBytes: { type: integer, minimum: 1, maximum: 9750000000 }
+        default: { $ref: '#/components/responses/DevError' }
+    post:
+      operationId: startDevUpload
+      summary: Reserve storage and start multipart upload, idempotent for the same client ID and metadata
+      security: [{ DevBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DevRecordingInput'
+      responses:
+        '200': { $ref: '#/components/responses/DevRecording' }
+        default: { $ref: '#/components/responses/DevError' }
+  /api/v1/video-poc/recordings/{id}/parts:
+    parameters: [{ $ref: '#/components/parameters/DevRecordingId' }]
+    get:
+      operationId: listDevUploadParts
+      summary: Discover parts present at the expected size in R2
+      security: [{ DevBearer: [] }]
+      responses:
+        '200':
+          description: One-based part numbers that can be skipped when resuming.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [completed]
+                properties:
+                  completed: { type: array, items: { type: integer, minimum: 1 } }
+        default: { $ref: '#/components/responses/DevError' }
+  /api/v1/video-poc/recordings/{id}/parts/{part}:
+    parameters:
+      - $ref: '#/components/parameters/DevRecordingId'
+      - name: part
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 291 }
+    post:
+      operationId: signDevUploadPart
+      summary: Sign a direct R2 PUT for a specific part and byte length
+      security: [{ DevBearer: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/DevSignedUrl' }
+        default: { $ref: '#/components/responses/DevError' }
+  /api/v1/video-poc/recordings/{id}/complete:
+    parameters: [{ $ref: '#/components/parameters/DevRecordingId' }]
+    post:
+      operationId: completeDevUpload
+      summary: Reconcile the provider part list, complete the multipart upload and verify object metadata
+      security: [{ DevBearer: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/DevRecording' }
+        default: { $ref: '#/components/responses/DevError' }
+  /api/v1/video-poc/recordings/{id}/playback:
+    parameters: [{ $ref: '#/components/parameters/DevRecordingId' }]
+    post:
+      operationId: signDevPlayback
+      summary: Sign a direct R2 GET for a completed recording; clients may request byte ranges
+      security: [{ DevBearer: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/DevSignedUrl' }
+        default: { $ref: '#/components/responses/DevError' }
+  /api/v1/video-poc/recordings/{id}:
+    parameters: [{ $ref: '#/components/parameters/DevRecordingId' }]
+    delete:
+      operationId: deleteDevRecording
+      summary: Abort multipart work, delete the object and release the recording reservation
+      security: [{ DevBearer: [] }]
+      responses:
+        '204': { description: No recording remains for this owner and ID. }
+        default: { $ref: '#/components/responses/DevError' }
 components:
+  securitySchemes:
+    DevBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A DEV Supabase access token for an active admin on the configured team.
+  parameters:
+    DevRecordingId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    DevRecording:
+      description: Recording metadata without provider IDs, object keys or credentials.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DevRecording' }
+    DevSignedUrl:
+      description: Private, no-store response with a short-lived R2 capability URL.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [url, expiresIn]
+            properties:
+              url: { type: string, format: uri }
+              expiresIn: { type: integer, minimum: 1, maximum: 1800 }
+    DevError:
+      description: DEV-only route unavailable, invalid or unauthorized request, recording conflict, or failed dependency operation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   schemas:
+    DevRecordingInput:
+      type: object
+      required: [id, name, size, durationMs, sha256]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 5, maxLength: 240 }
+        size: { type: integer, minimum: 1, maximum: 9750000000 }
+        durationMs: { type: integer, minimum: 1, maximum: 86400000 }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    DevRecording:
+      allOf:
+        - $ref: '#/components/schemas/DevRecordingInput'
+        - type: object
+          required: [status, expiresAt, busyUntil]
+          properties:
+            status: { type: string, enum: [starting, uploading, completing, ready, deleting] }
+            expiresAt: { type: string, format: date-time }
+            busyUntil: { type: [string, 'null'], format: date-time }
     Health:
       type: object
       required: [status, environment, version, revision]

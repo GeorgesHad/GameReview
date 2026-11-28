@@ -26,8 +26,8 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run check:deploy
-      - run: npx --no-install playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - name: Run browser checks with Google Chrome and its MP4 codecs
+        run: PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$(command -v google-chrome)" npm run test:e2e
 
   deploy:
     name: Deploy and smoke test Worker
@@ -75,6 +75,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_VIDEO_POC_SUPABASE_URL: ${{ github.ref_name == 'develop' && vars.VIDEO_POC_SUPABASE_URL || '' }}
+          VITE_VIDEO_POC_SUPABASE_PUBLISHABLE_KEY: ${{ github.ref_name == 'develop' && vars.VIDEO_POC_SUPABASE_PUBLISHABLE_KEY || '' }}
       - name: Confirm the deploy commit is still the branch tip
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,7 +100,9 @@ jobs:
             echo 'Configure the HTTPS workers.dev origin for the selected Worker.' >&2
             exit 1
           fi
-          npx --no-install wrangler deploy --env "$TARGET" --tag "$GITHUB_SHA"
+          deploy_args=(--env "$TARGET" --tag "$GITHUB_SHA")
+          if [[ "$TARGET" == dev ]]; then deploy_args+=(--keep-vars); fi
+          npx --no-install wrangler deploy "${deploy_args[@]}"
           for attempt in 1 2 3 4 5 6; do
             if curl -fsS --max-time 10 "$BASE_URL/api/v1/health" |
               jq -e --arg env "$TARGET" --arg sha "$GITHUB_SHA" \

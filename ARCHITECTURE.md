@@ -1,21 +1,26 @@
 # Architecture
 
-Football Match Review is a modular monolith. Each environment has one Cloudflare Worker deployment and HTTPS origin. Cloudflare serves the built Vite assets and routes `/api` and `/api/*` to Hono before considering the SPA fallback. The only implemented API is the public `GET /api/v1/health` liveness check. Its environment, version and revision identify the running Worker. It does not use external services.
+Football Match Review is a modular monolith. Each environment has one Cloudflare Worker deployment and HTTPS origin. Cloudflare serves the built Vite assets and routes `/api` and `/api/*` to Hono before considering the SPA fallback. The public `GET /api/v1/health` liveness check identifies the running Worker without any external calls. A separate DEV route group supports the private video lab.
 
 | Location | Responsibility |
 | --- | --- |
 | `frontend/src/pages` | React screens and user-facing state. Extract shared components as they recur. |
 | `frontend/src/api` | Same-origin HTTP clients and response validation using shared contracts. |
 | `backend/src` | Worker entry point, Hono routes and safe request metadata. |
+| `backend/src/video-poc`, `frontend/src/video-poc` | Isolated Phase 2 routes, storage and database adapters, upload and playback UI. |
 | `shared/contracts`, `docs/openapi.yaml` | Zod schemas and a REST contract that can outlive React, Hono or Workers. |
 | `supabase/migrations`, `supabase/fixtures` | Forward-only PostgreSQL migrations and optional DEV fixtures. |
 | `tests` | API unit tests, PostgreSQL migration checks, and browser tests against the built Worker and assets. |
 
 Introduce `backend/src/services`, `repositories` and `infrastructure` as the first workflows need them. Hono controllers will translate HTTP and call services. Services will own team access checks and workflow rules. Repositories will own SQL operations and transactional boundaries. Supabase Auth, PostgreSQL access and R2 signing will sit at the infrastructure boundary. Application logic should avoid runtime-specific request or storage types so a Spring Boot replacement can preserve the contracts and SQL.
 
-The first migration separates Auth identity, profile, team and membership. Membership stores roles and stable player codes. It can be disabled while retaining IDs. `anon` and `authenticated` have no direct table grants or RLS policies. The Worker will authorize before using its private service credential. Use additional team-consistent keys when the match, recording and note schema lands. Keep R2 object identity separate from logical recording identity and reconcile database and bucket changes after failures.
+The first migration separates Auth identity, profile, team and membership. Membership stores roles and stable player codes. It can be disabled while retaining IDs. `anon` and `authenticated` have no direct table grants or RLS policies. The Worker checks authorization before using its private service credential for recording operations. Use additional team-consistent keys when the match, recording and note schema lands. Keep R2 object identity separate from logical recording identity and reconcile database and bucket changes after failures.
 
 Use direct browser-to-R2 transfers. The Worker will reserve storage, authorize and sign a specific operation. Private objects remain private, and a signed URL can continue working through its expiry after an authorization change. Cloudflare Cron will run bounded cleanup after those state transitions are implemented. A manifest and icons establish the PWA shell. The foundation has no service worker or offline cache. The browser can read public assets even when future application data and video are access controlled.
+
+The DEV video lab uses Supabase password sign-in with sessions held in memory. On each API call the Worker checks issuer, audience and expiry, verifies the access token with Supabase Auth, and checks active admin membership on the configured DEV team. Recording reads and writes are scoped to both team and owner. The database copies of the POC migration and deployed frontend settings are restricted to `develop`. A separate Worker check rejects the API in any environment except configured DEV.
+
+The DEV-only table tracks file identity and a single multipart upload per recording. An advisory lock serializes reservations. Claims with time limits serialize completion and deletion, and retries can recover by reading R2's object or part metadata. Incomplete and completed recordings count against the same limit until cleanup is confirmed. The browser hashes the source in bounded chunks, sends original 32 MiB slices directly to R2 and resumes from R2's size-checked part list. AWS SigV4 upload URLs include the expected part length, and playback URLs allow native byte ranges. Final completion checks object size and media type. The POC relies on the browser's MP4 metadata probe and source hash, so an independent provider-verified full-file digest remains a future integrity decision.
 
 ## Requirements review and decisions to validate
 
