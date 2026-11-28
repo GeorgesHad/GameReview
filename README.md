@@ -111,3 +111,5 @@ Use the Supabase project's **Settings → API Keys** for the publishable and ser
 Keep original uploaded MP4 bytes separately under owner control. Before a production migration, run the [Supabase logical backup procedure](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore) using a trusted cloud runner with the matching project connection. Keep schema, roles, data, migration history and any required Auth records in an owner-controlled encrypted location. Keep provider settings and key rotation instructions separately, and check Auth recovery on a disposable environment before relying on backups. A database or Worker rollback cannot recover deleted R2 bytes on its own.
 
 Live GitHub Actions, Worker deployments, Supabase Auth and project migrations, R2 multipart/CORS and media playback on real devices require external verification. Use the [roadmap](PROGRESS.md) for those acceptance gates. The sample CSV at `tests/fixtures/sample-notes.csv` is for later import testing.
+
+test
